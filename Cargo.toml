@@ -1,0 +1,15 @@
+[package]
+name = "pektin-common"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+trust-dns-proto = { version = "0.21.0-alpha.2", features = ["dnssec", "serde-config"] }
+
+[lib]
+name = "pektin_common"
+path = "src/lib.rs"
