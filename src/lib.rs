@@ -31,7 +31,7 @@ pub struct RedisEntry {
     pub value: RedisValue,
 }
 
-pub fn load_env(default: &str, param_name: &str) -> Result<String, PektinCommonError> {
+pub fn load_env(default: &str, param_name: &str, log: bool) -> Result<String, PektinCommonError> {
     let res = if let Ok(param) = env::var(param_name) {
         param
     } else {
@@ -41,6 +41,8 @@ pub fn load_env(default: &str, param_name: &str) -> Result<String, PektinCommonE
             default.into()
         }
     };
-    println!("\t{}={}", param_name, res);
+    if log {
+        println!("\t{}={}", param_name, res);
+    }
     Ok(res)
 }
