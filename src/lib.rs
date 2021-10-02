@@ -3,7 +3,7 @@ pub use trust_dns_proto as proto;
 use serde::{Deserialize, Serialize};
 use std::env;
 use thiserror::Error;
-use trust_dns_proto::rr::{RData, RecordType};
+use trust_dns_proto::rr::RData;
 
 #[derive(Debug, Error)]
 pub enum PektinCommonError {
@@ -20,15 +20,9 @@ pub struct ResourceRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RedisValue {
-    pub rr_type: RecordType,
-    pub rr_set: Vec<ResourceRecord>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
 pub struct RedisEntry {
     pub name: String,
-    pub value: RedisValue,
+    pub rr_set: Vec<ResourceRecord>,
 }
 
 pub fn load_env(default: &str, param_name: &str, log: bool) -> Result<String, PektinCommonError> {
