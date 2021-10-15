@@ -6,7 +6,7 @@ use deadpool_redis::Connection;
 use serde::{Deserialize, Serialize};
 use std::env;
 use thiserror::Error;
-use trust_dns_proto::rr::{Name, RData};
+use trust_dns_proto::rr::RData;
 
 #[derive(Debug, Error)]
 pub enum PektinCommonError {
@@ -53,7 +53,9 @@ pub fn load_env(
 }
 
 // find all zones that we are authoritative for
-pub async fn get_authoritative_zones(con: &mut Connection) -> Result<Vec<Name>, PektinCommonError> {
+pub async fn get_authoritative_zones(
+    con: &mut Connection,
+) -> Result<Vec<String>, PektinCommonError> {
     Ok(con
         .keys::<_, Vec<String>>("*.:SOA")
         .await?
@@ -62,6 +64,5 @@ pub async fn get_authoritative_zones(con: &mut Connection) -> Result<Vec<Name>, 
             key.truncate(key.find(":").unwrap());
             key
         })
-        .map(|name| Name::from_ascii(name).expect("Key in redis is not a valid name"))
         .collect())
 }
