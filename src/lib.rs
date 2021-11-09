@@ -1,12 +1,20 @@
 pub use deadpool_redis;
+use proto::rr::{
+    rdata::{caa, openpgpkey, tlsa, txt, CAA, MX, SOA, SRV},
+    Name,
+};
 pub use trust_dns_proto as proto;
 
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::Connection;
 use serde::{Deserialize, Serialize};
-use std::env;
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::{
+    convert::TryFrom,
+    env,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 use thiserror::Error;
-use trust_dns_proto::rr::RData;
 
 #[derive(Debug, Error)]
 pub enum PektinCommonError {
@@ -21,13 +29,165 @@ pub enum PektinCommonError {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ResourceRecord {
     pub ttl: u32,
-    pub value: RData,
+    pub value: RecordData,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RedisEntry {
     pub name: String,
     pub rr_set: Vec<ResourceRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Property {
+    #[serde(rename = "iodef")]
+    Iodef,
+    #[serde(rename = "issue")]
+    Issue,
+    #[serde(rename = "issuewild")]
+    IssueWild,
+}
+
+impl From<Property> for caa::Property {
+    fn from(prop: Property) -> Self {
+        match prop {
+            Property::Iodef => caa::Property::Iodef,
+            Property::Issue => caa::Property::Issue,
+            Property::IssueWild => caa::Property::IssueWild,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
+pub enum CertUsage {
+    CA = 0,
+    Service = 1,
+    TrustAnchor = 2,
+    DomainIssued = 3,
+}
+
+impl From<CertUsage> for tlsa::CertUsage {
+    fn from(usage: CertUsage) -> Self {
+        match usage {
+            CertUsage::CA => Self::CA,
+            CertUsage::Service => Self::Service,
+            CertUsage::TrustAnchor => Self::TrustAnchor,
+            CertUsage::DomainIssued => Self::DomainIssued,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
+pub enum Selector {
+    Full = 0,
+    Spki = 1,
+}
+
+impl From<Selector> for tlsa::Selector {
+    fn from(selector: Selector) -> Self {
+        match selector {
+            Selector::Full => Self::Full,
+            Selector::Spki => Self::Spki,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
+pub enum Matching {
+    Raw = 0,
+    Sha256 = 1,
+    Sha512 = 2,
+}
+
+impl From<Matching> for tlsa::Matching {
+    fn from(matching: Matching) -> Self {
+        match matching {
+            Matching::Raw => Self::Raw,
+            Matching::Sha256 => Self::Sha256,
+            Matching::Sha512 => Self::Sha512,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum RecordData {
+    A(Ipv4Addr),
+    AAAA(Ipv6Addr),
+    CAA {
+        issuer_critical: bool,
+        tag: Property,
+        value: String,
+    },
+    CNAME(Name),
+    MX(MX),
+    NS(Name),
+    OPENPGPKEY(String),
+    SOA(SOA),
+    SRV(SRV),
+    TLSA {
+        cert_usage: CertUsage,
+        selector: Selector,
+        matching: Matching,
+        cert_data: String,
+    },
+    TXT(String),
+}
+
+impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
+    type Error = String;
+    fn try_from(rec: RecordData) -> Result<Self, String> {
+        match rec {
+            RecordData::A(addr) => Ok(Self::A(addr)),
+            RecordData::AAAA(addr) => Ok(Self::AAAA(addr)),
+            RecordData::CAA {
+                issuer_critical,
+                tag,
+                value,
+            } => {
+                let value = match tag {
+                    Property::Iodef => {
+                        caa::Value::Url(url::Url::parse(&value).map_err(|e| e.to_string())?)
+                    }
+                    Property::Issue => caa::Value::Issuer(
+                        Some(Name::from_utf8(value).map_err(|e| e.to_string())?),
+                        vec![],
+                    ),
+                    Property::IssueWild => caa::Value::Issuer(
+                        Some(Name::from_utf8(value).map_err(|e| e.to_string())?),
+                        vec![],
+                    ),
+                };
+                Ok(Self::CAA(CAA {
+                    issuer_critical,
+                    tag: tag.into(),
+                    value,
+                }))
+            }
+            RecordData::CNAME(name) => Ok(Self::CNAME(name)),
+            RecordData::MX(mx) => Ok(Self::MX(mx)),
+            RecordData::NS(name) => Ok(Self::NS(name)),
+            RecordData::OPENPGPKEY(key) => Ok(Self::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
+                base64::decode(&key).map_err(|e| e.to_string())?,
+            ))),
+            RecordData::SOA(soa) => Ok(Self::SOA(soa)),
+            RecordData::SRV(srv) => Ok(Self::SRV(srv)),
+            RecordData::TLSA {
+                cert_usage,
+                selector,
+                matching,
+                cert_data,
+            } => Ok(Self::TLSA(tlsa::TLSA::new(
+                cert_usage.into(),
+                selector.into(),
+                matching.into(),
+                hex::decode(&cert_data).map_err(|e| e.to_string())?,
+            ))),
+            RecordData::TXT(txt) => Ok(Self::TXT(txt::TXT::new(vec![txt]))),
+        }
+    }
 }
 
 pub fn load_env(
