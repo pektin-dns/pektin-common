@@ -154,15 +154,21 @@ impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
                 value,
             } => {
                 let value = match tag {
-                    Property::Iodef => {
-                        caa::Value::Url(url::Url::parse(&value).map_err(|e| e.to_string())?)
-                    }
+                    Property::Iodef => caa::Value::Url(
+                        url::Url::parse(&value).map_err(|_| "invalid CAA iodef url".to_string())?,
+                    ),
                     Property::Issue => caa::Value::Issuer(
-                        Some(Name::from_utf8(value).map_err(|e| e.to_string())?),
+                        Some(
+                            Name::from_utf8(value)
+                                .map_err(|_| "invalid CAA issue name".to_string())?,
+                        ),
                         vec![],
                     ),
                     Property::IssueWild => caa::Value::Issuer(
-                        Some(Name::from_utf8(value).map_err(|e| e.to_string())?),
+                        Some(
+                            Name::from_utf8(value)
+                                .map_err(|_| "invalid CAA issuewild name".to_string())?,
+                        ),
                         vec![],
                     ),
                 };
@@ -176,7 +182,8 @@ impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
             RecordData::MX(mx) => Ok(Self::MX(mx)),
             RecordData::NS(name) => Ok(Self::NS(name)),
             RecordData::OPENPGPKEY(key) => Ok(Self::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
-                base64::decode(&key).map_err(|e| e.to_string())?,
+                base64::decode(&key)
+                    .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
             ))),
             RecordData::SOA(soa) => Ok(Self::SOA(soa)),
             RecordData::SRV(srv) => Ok(Self::SRV(srv)),
@@ -189,7 +196,8 @@ impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
                 cert_usage.into(),
                 selector.into(),
                 matching.into(),
-                hex::decode(&cert_data).map_err(|e| e.to_string())?,
+                hex::decode(&cert_data)
+                    .map_err(|_| "TLSA certificate data not hexadecimal data".to_string())?,
             ))),
             RecordData::TXT(txt) => Ok(Self::TXT(txt::TXT::new(vec![txt]))),
         }
