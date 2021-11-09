@@ -10,7 +10,7 @@ use deadpool_redis::Connection;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
-    convert::TryFrom,
+    convert::{TryFrom, TryInto},
     env,
     net::{Ipv4Addr, Ipv6Addr},
 };
@@ -134,6 +134,12 @@ pub enum RecordData {
         cert_data: String,
     },
     TXT(String),
+}
+
+impl RecordData {
+    pub fn convert(self) -> Result<trust_dns_proto::rr::RData, String> {
+        self.try_into()
+    }
 }
 
 impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
