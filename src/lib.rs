@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     convert::{TryFrom, TryInto},
-    env,
+    env, fs,
     net::{Ipv4Addr, Ipv6Addr},
 };
 use thiserror::Error;
@@ -22,6 +22,8 @@ pub enum PektinCommonError {
     MissingEnvVar(String),
     #[error("Environment variable {0} is invalid")]
     InvalidEnvVar(String),
+    #[error("Couldn't read file based environment variable: {0} from path: {1} \n {2}")]
+    InvalidEnvVarFilePath(String, String, String),
     #[error("Error contacting Redis")]
     Redis(#[from] deadpool_redis::redis::RedisError),
 }
@@ -210,6 +212,16 @@ pub fn load_env(
     confidential: bool,
 ) -> Result<String, PektinCommonError> {
     let res = if let Ok(param) = env::var(param_name) {
+        if param_name.ends_with("_FILE") {
+            return match fs::read_to_string(&param) {
+                Ok(val) => Ok(val),
+                Err(err) => Err(PektinCommonError::InvalidEnvVarFilePath(
+                    param_name.into(),
+                    param,
+                    err.to_string(),
+                )),
+            };
+        }
         param
     } else {
         if default.is_empty() {
