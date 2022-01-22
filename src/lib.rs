@@ -1,8 +1,6 @@
 pub use deadpool_redis;
-use proto::rr::{
-    rdata::{caa, openpgpkey, tlsa, txt, CAA, MX, SOA, SRV},
-    Name,
-};
+use proto::rr::rdata::{caa, openpgpkey, tlsa, txt, MX, SOA, SRV};
+use proto::rr::{Name, RData};
 pub use trust_dns_proto as proto;
 
 use deadpool_redis::redis::AsyncCommands;
@@ -28,16 +26,134 @@ pub enum PektinCommonError {
     Redis(#[from] deadpool_redis::redis::RedisError),
 }
 
+// The following type definitions may seem weird (because they are), but they were crafted
+// carefully to make the serialized JSON look nice.
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ResourceRecord {
+pub struct ARecord {
     pub ttl: u32,
-    pub value: RecordData,
+    pub value: Ipv4Addr,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct AaaaRecord {
+    pub ttl: u32,
+    pub value: Ipv6Addr,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CaaRecord {
+    pub ttl: u32,
+    pub issuer_critical: bool,
+    pub tag: Property,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CnameRecord {
+    pub ttl: u32,
+    pub value: Name,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MxRecord {
+    pub ttl: u32,
+    #[serde(flatten)]
+    pub value: MX,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct NsRecord {
+    pub ttl: u32,
+    #[serde(flatten)]
+    pub value: Name,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct OpenpgpkeyRecord {
+    pub ttl: u32,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SoaRecord {
+    pub ttl: u32,
+    #[serde(flatten)]
+    pub value: SOA,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SrvRecord {
+    pub ttl: u32,
+    #[serde(flatten)]
+    pub value: SRV,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TlsaRecord {
+    pub ttl: u32,
+    pub cert_usage: CertUsage,
+    pub selector: Selector,
+    pub matching: Matching,
+    pub cert_data: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct TxtRecord {
+    pub ttl: u32,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "rr_type")]
+pub enum RrSet {
+    A { rr_set: Vec<ARecord> },
+    AAAA { rr_set: Vec<AaaaRecord> },
+    CAA { rr_set: Vec<CaaRecord> },
+    CNAME { rr_set: Vec<CnameRecord> },
+    MX { rr_set: Vec<MxRecord> },
+    NS { rr_set: Vec<NsRecord> },
+    OPENPGPKEY { rr_set: Vec<OpenpgpkeyRecord> },
+    SOA { rr_set: Vec<SoaRecord> },
+    SRV { rr_set: Vec<SrvRecord> },
+    TLSA { rr_set: Vec<TlsaRecord> },
+    TXT { rr_set: Vec<TxtRecord> },
+}
+
+// TODO the rest
+macro_rules! rr_set_vec {
+    ($self:ident, $vec_name:ident, $vec_expr:expr) => {
+        match $self {
+            RrSet::A { $vec_name } => $vec_expr,
+            RrSet::AAAA { $vec_name } => $vec_expr,
+            RrSet::CAA { $vec_name } => $vec_expr,
+            RrSet::CNAME { $vec_name } => $vec_expr,
+            RrSet::MX { $vec_name } => $vec_expr,
+            RrSet::NS { $vec_name } => $vec_expr,
+            RrSet::OPENPGPKEY { $vec_name } => $vec_expr,
+            RrSet::SOA { $vec_name } => $vec_expr,
+            RrSet::SRV { $vec_name } => $vec_expr,
+            RrSet::TLSA { $vec_name } => $vec_expr,
+            RrSet::TXT { $vec_name } => $vec_expr,
+        }
+    };
+}
+
+impl RrSet {
+    pub fn len(&self) -> usize {
+        rr_set_vec!(self, rr_set, rr_set.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        rr_set_vec!(self, rr_set, rr_set.is_empty())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RedisEntry {
-    pub name: String,
-    pub rr_set: Vec<ResourceRecord>,
+    pub name: Name,
+    #[serde(flatten)]
+    pub rr_set: RrSet,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -114,94 +230,144 @@ impl From<Matching> for tlsa::Matching {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum RecordData {
-    A(Ipv4Addr),
-    AAAA(Ipv6Addr),
-    CAA {
-        issuer_critical: bool,
-        tag: Property,
-        value: String,
-    },
-    CNAME(Name),
-    MX(MX),
-    NS(Name),
-    OPENPGPKEY(String),
-    SOA(SOA),
-    SRV(SRV),
-    TLSA {
-        cert_usage: CertUsage,
-        selector: Selector,
-        matching: Matching,
-        cert_data: String,
-    },
-    TXT(String),
-}
-
-impl RecordData {
-    pub fn convert(self) -> Result<trust_dns_proto::rr::RData, String> {
+impl RedisEntry {
+    pub fn convert(self) -> Result<Vec<trust_dns_proto::rr::Record>, String> {
         self.try_into()
+    }
+
+    pub fn rr_type_str(&self) -> &'static str {
+        match self.rr_set {
+            RrSet::A { .. } => "A",
+            RrSet::AAAA { .. } => "AAAA",
+            RrSet::CAA { .. } => "CAA",
+            RrSet::CNAME { .. } => "CNAME",
+            RrSet::MX { .. } => "MX",
+            RrSet::NS { .. } => "NS",
+            RrSet::OPENPGPKEY { .. } => "OPENPGPKEY",
+            RrSet::SOA { .. } => "SOA",
+            RrSet::SRV { .. } => "SRV",
+            RrSet::TLSA { .. } => "TLSA",
+            RrSet::TXT { .. } => "TXT",
+        }
     }
 }
 
-impl TryFrom<RecordData> for trust_dns_proto::rr::RData {
+impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
     type Error = String;
-    fn try_from(rec: RecordData) -> Result<Self, String> {
-        match rec {
-            RecordData::A(addr) => Ok(Self::A(addr)),
-            RecordData::AAAA(addr) => Ok(Self::AAAA(addr)),
-            RecordData::CAA {
-                issuer_critical,
-                tag,
-                value,
-            } => {
-                let value = match tag {
-                    Property::Iodef => caa::Value::Url(
-                        url::Url::parse(&value).map_err(|_| "invalid CAA iodef url".to_string())?,
-                    ),
-                    Property::Issue => caa::Value::Issuer(
-                        Some(
-                            Name::from_utf8(value)
-                                .map_err(|_| "invalid CAA issue name".to_string())?,
+    fn try_from(entry: RedisEntry) -> Result<Self, String> {
+        use trust_dns_proto::rr::Record;
+        match entry.rr_set {
+            RrSet::A { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::A(data.value)))
+                .collect()),
+            RrSet::AAAA { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), data.ttl, RData::AAAA(data.value))
+                })
+                .collect()),
+            RrSet::CAA { rr_set } => {
+                // and now for the tricky bit (RIP Joe Armstrong)
+                let conv = |record: CaaRecord| {
+                    let value = match record.tag {
+                        Property::Iodef => caa::Value::Url(
+                            url::Url::parse(&record.value)
+                                .map_err(|_| "invalid CAA iodef url".to_string())?,
                         ),
-                        vec![],
-                    ),
-                    Property::IssueWild => caa::Value::Issuer(
-                        Some(
-                            Name::from_utf8(value)
-                                .map_err(|_| "invalid CAA issuewild name".to_string())?,
+                        Property::Issue => caa::Value::Issuer(
+                            Some(
+                                Name::from_utf8(record.value)
+                                    .map_err(|_| "invalid CAA issue name".to_string())?,
+                            ),
+                            vec![],
                         ),
-                        vec![],
-                    ),
+                        Property::IssueWild => caa::Value::Issuer(
+                            Some(
+                                Name::from_utf8(record.value)
+                                    .map_err(|_| "invalid CAA issuewild name".to_string())?,
+                            ),
+                            vec![],
+                        ),
+                    };
+                    Ok(Record::from_rdata(
+                        entry.name.clone(),
+                        record.ttl,
+                        RData::CAA(caa::CAA {
+                            issuer_critical: record.issuer_critical,
+                            tag: record.tag.into(),
+                            value,
+                        }),
+                    ))
                 };
-                Ok(Self::CAA(CAA {
-                    issuer_critical,
-                    tag: tag.into(),
-                    value,
-                }))
+                rr_set.into_iter().map(conv).collect()
             }
-            RecordData::CNAME(name) => Ok(Self::CNAME(name)),
-            RecordData::MX(mx) => Ok(Self::MX(mx)),
-            RecordData::NS(name) => Ok(Self::NS(name)),
-            RecordData::OPENPGPKEY(key) => Ok(Self::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
-                base64::decode(&key)
-                    .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
-            ))),
-            RecordData::SOA(soa) => Ok(Self::SOA(soa)),
-            RecordData::SRV(srv) => Ok(Self::SRV(srv)),
-            RecordData::TLSA {
-                cert_usage,
-                selector,
-                matching,
-                cert_data,
-            } => Ok(Self::TLSA(tlsa::TLSA::new(
-                cert_usage.into(),
-                selector.into(),
-                matching.into(),
-                hex::decode(&cert_data)
-                    .map_err(|_| "TLSA certificate data not hexadecimal data".to_string())?,
-            ))),
-            RecordData::TXT(txt) => Ok(Self::TXT(txt::TXT::new(vec![txt]))),
+            RrSet::CNAME { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), data.ttl, RData::CNAME(data.value))
+                })
+                .collect()),
+            RrSet::MX { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::MX(data.value)))
+                .collect()),
+            RrSet::NS { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::NS(data.value)))
+                .collect()),
+            RrSet::OPENPGPKEY { rr_set } => {
+                let conv = |record: OpenpgpkeyRecord| {
+                    Ok(Record::from_rdata(
+                        entry.name.clone(),
+                        record.ttl,
+                        RData::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
+                            base64::decode(&record.value)
+                                .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
+                        )),
+                    ))
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
+            RrSet::SOA { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), data.ttl, RData::SOA(data.value))
+                })
+                .collect()),
+            RrSet::SRV { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), data.ttl, RData::SRV(data.value))
+                })
+                .collect()),
+            RrSet::TLSA { rr_set } => {
+                let conv = |record: TlsaRecord| {
+                    Ok(Record::from_rdata(
+                        entry.name.clone(),
+                        record.ttl,
+                        RData::TLSA(tlsa::TLSA::new(
+                            record.cert_usage.into(),
+                            record.selector.into(),
+                            record.matching.into(),
+                            hex::decode(&record.cert_data).map_err(|_| {
+                                "TLSA certificate data not hexadecimal data".to_string()
+                            })?,
+                        )),
+                    ))
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
+            RrSet::TXT { rr_set } => Ok(rr_set
+                .into_iter()
+                .map(|data| {
+                    Record::from_rdata(
+                        entry.name.clone(),
+                        data.ttl,
+                        RData::TXT(txt::TXT::new(vec![data.value])),
+                    )
+                })
+                .collect()),
         }
     }
 }
