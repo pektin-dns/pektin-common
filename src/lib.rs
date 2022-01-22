@@ -65,7 +65,6 @@ pub struct MxRecord {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NsRecord {
     pub ttl: u32,
-    #[serde(flatten)]
     pub value: Name,
 }
 
