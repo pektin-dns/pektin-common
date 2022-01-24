@@ -24,6 +24,8 @@ pub enum PektinCommonError {
     InvalidEnvVarFilePath(String, String, String),
     #[error("Error contacting Redis")]
     Redis(#[from] deadpool_redis::redis::RedisError),
+    #[error("Could not (de)serialize JSON")]
+    Json(#[from] serde_json::Error),
 }
 
 // The following type definitions may seem weird (because they are), but they were crafted
@@ -230,11 +232,48 @@ impl From<Matching> for tlsa::Matching {
 }
 
 impl RedisEntry {
+    /// Tries to convert the entry to a vector of TrustDNS's [`Record`](trust_dns_proto::rr::Record)
+    /// type.
     pub fn convert(self) -> Result<Vec<trust_dns_proto::rr::Record>, String> {
         self.try_into()
     }
 
-    pub fn rr_type_str(&self) -> &'static str {
+    /// The key to use in redis for this entry.
+    pub fn redis_key(&self) -> String {
+        format!("{}:{}", self.name.to_lowercase(), self.rr_type_str())
+    }
+
+    /// Serializes this entry to store it in redis.
+    ///
+    /// Note that deserializing must be done using
+    /// [`deserialize_from_redis()`](RedisEntry::deserialize_from_redis()).
+    pub fn serialize_for_redis(&self) -> Result<String, PektinCommonError> {
+        let value = serde_json::to_value(self)?;
+        serde_json::to_string(&value["rr_set"]).map_err(Into::into)
+    }
+
+    /// Deserializes a [`RedisEntry`] from a redis key and value.
+    ///
+    /// The value must match the format that is returned by
+    /// [`serialize_for_redis()`](RedisEntry::serialize_for_redis()).
+    pub fn deserialize_from_redis(
+        redis_key: impl AsRef<str>,
+        redis_value: impl AsRef<str>,
+    ) -> Result<Self, PektinCommonError> {
+        let (name, rr_type) = redis_key
+            .as_ref()
+            .split_once(":")
+            .expect("Record key in redis has invalid format");
+        serde_json::from_str(&format!(
+            r#"{{ "name": "{}", "rr_type": "{}", "rr_set": {} }}"#,
+            name,
+            rr_type,
+            redis_value.as_ref()
+        ))
+        .map_err(Into::into)
+    }
+
+    fn rr_type_str(&self) -> &'static str {
         match self.rr_set {
             RrSet::A { .. } => "A",
             RrSet::AAAA { .. } => "AAAA",
