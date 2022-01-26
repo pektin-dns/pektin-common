@@ -121,7 +121,6 @@ pub enum RrSet {
     TXT { rr_set: Vec<TxtRecord> },
 }
 
-// TODO the rest
 macro_rules! rr_set_vec {
     ($self:ident, $vec_name:ident, $vec_expr:expr) => {
         match $self {
