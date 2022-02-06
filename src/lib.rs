@@ -121,6 +121,7 @@ pub enum RrSet {
     TXT { rr_set: Vec<TxtRecord> },
 }
 
+#[macro_export]
 macro_rules! rr_set_vec {
     ($self:ident, $vec_name:ident, $vec_expr:expr) => {
         match $self {
@@ -426,12 +427,10 @@ pub fn load_env(
             };
         }
         param
+    } else if default.is_empty() {
+        return Err(PektinCommonError::MissingEnvVar(param_name.into()));
     } else {
-        if default.is_empty() {
-            return Err(PektinCommonError::MissingEnvVar(param_name.into()));
-        } else {
-            default.into()
-        }
+        default.into()
     };
     if !confidential {
         println!("\t{}={}", param_name, res);
@@ -450,7 +449,7 @@ pub async fn get_authoritative_zones(
         .await?
         .into_iter()
         .map(|mut key| {
-            key.truncate(key.find(":").unwrap());
+            key.truncate(key.find(':').unwrap());
             key
         })
         .collect())
