@@ -1,6 +1,8 @@
 pub use deadpool_redis;
+use proto::rr::dnssec;
+use proto::rr::dnssec::rdata::{dnskey, sig, DNSSECRData};
 use proto::rr::rdata::{caa, openpgpkey, tlsa, txt, MX, SOA, SRV};
-use proto::rr::{Name, RData};
+use proto::rr::{Name, RData, RecordType};
 pub use trust_dns_proto as proto;
 
 use deadpool_redis::redis::AsyncCommands;
@@ -58,6 +60,16 @@ pub struct CnameRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DnskeyRecord {
+    pub ttl: u32,
+    pub zone: bool,
+    pub revoked: bool,
+    pub secure_entry_point: bool,
+    pub algorithm: DnssecAlgorithm,
+    pub key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MxRecord {
     pub ttl: u32,
     #[serde(flatten)]
@@ -74,6 +86,20 @@ pub struct NsRecord {
 pub struct OpenpgpkeyRecord {
     pub ttl: u32,
     pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RrsigRecord {
+    pub ttl: u32,
+    pub type_covered: RecordType,
+    pub algorithm: DnssecAlgorithm,
+    pub labels: u8,
+    pub original_ttl: u32,
+    pub signature_expiration: u32,
+    pub signature_inception: u32,
+    pub key_tag: u16,
+    pub signer_name: Name,
+    pub signature: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -112,9 +138,11 @@ pub enum RrSet {
     AAAA { rr_set: Vec<AaaaRecord> },
     CAA { rr_set: Vec<CaaRecord> },
     CNAME { rr_set: Vec<CnameRecord> },
+    DNSKEY { rr_set: Vec<DnskeyRecord> },
     MX { rr_set: Vec<MxRecord> },
     NS { rr_set: Vec<NsRecord> },
     OPENPGPKEY { rr_set: Vec<OpenpgpkeyRecord> },
+    RRSIG { rr_set: Vec<RrsigRecord> },
     SOA { rr_set: Vec<SoaRecord> },
     SRV { rr_set: Vec<SrvRecord> },
     TLSA { rr_set: Vec<TlsaRecord> },
@@ -128,9 +156,11 @@ macro_rules! rr_set_vec {
             RrSet::AAAA { $vec_name } => $vec_expr,
             RrSet::CAA { $vec_name } => $vec_expr,
             RrSet::CNAME { $vec_name } => $vec_expr,
+            RrSet::DNSKEY { $vec_name } => $vec_expr,
             RrSet::MX { $vec_name } => $vec_expr,
             RrSet::NS { $vec_name } => $vec_expr,
             RrSet::OPENPGPKEY { $vec_name } => $vec_expr,
+            RrSet::RRSIG { $vec_name } => $vec_expr,
             RrSet::SOA { $vec_name } => $vec_expr,
             RrSet::SRV { $vec_name } => $vec_expr,
             RrSet::TLSA { $vec_name } => $vec_expr,
@@ -230,6 +260,20 @@ impl From<Matching> for tlsa::Matching {
     }
 }
 
+#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
+pub enum DnssecAlgorithm {
+    ECDSAP256SHA256 = 13,
+}
+
+impl From<DnssecAlgorithm> for dnssec::Algorithm {
+    fn from(algorithm: DnssecAlgorithm) -> Self {
+        match algorithm {
+            DnssecAlgorithm::ECDSAP256SHA256 => Self::ECDSAP256SHA256,
+        }
+    }
+}
+
 impl RedisEntry {
     /// Tries to convert the entry to a vector of TrustDNS's [`Record`](trust_dns_proto::rr::Record)
     /// type.
@@ -261,7 +305,7 @@ impl RedisEntry {
     ) -> Result<Self, PektinCommonError> {
         let (name, rr_type) = redis_key
             .as_ref()
-            .split_once(":")
+            .split_once(':')
             .expect("Record key in redis has invalid format");
         serde_json::from_str(&format!(
             r#"{{ "name": "{}", "rr_type": "{}", "rr_set": {} }}"#,
@@ -278,9 +322,11 @@ impl RedisEntry {
             RrSet::AAAA { .. } => "AAAA",
             RrSet::CAA { .. } => "CAA",
             RrSet::CNAME { .. } => "CNAME",
+            RrSet::DNSKEY { .. } => "DNSKEY",
             RrSet::MX { .. } => "MX",
             RrSet::NS { .. } => "NS",
             RrSet::OPENPGPKEY { .. } => "OPENPGPKEY",
+            RrSet::RRSIG { .. } => "RRSIG",
             RrSet::SOA { .. } => "SOA",
             RrSet::SRV { .. } => "SRV",
             RrSet::TLSA { .. } => "TLSA",
@@ -345,6 +391,23 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                     Record::from_rdata(entry.name.clone(), data.ttl, RData::CNAME(data.value))
                 })
                 .collect()),
+            RrSet::DNSKEY { rr_set } => {
+                let conv = |record: DnskeyRecord| {
+                    Ok(Record::from_rdata(
+                        entry.name.clone(),
+                        record.ttl,
+                        RData::DNSSEC(DNSSECRData::DNSKEY(dnskey::DNSKEY::new(
+                            record.zone,
+                            record.secure_entry_point,
+                            record.revoked,
+                            record.algorithm.into(),
+                            base64::decode(&record.key)
+                                .map_err(|_| "DNSKKEY key not valid base64 (a-zA-Z0-9/+)")?,
+                        ))),
+                    ))
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
             RrSet::MX { rr_set } => Ok(rr_set
                 .into_iter()
                 .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::MX(data.value)))
@@ -362,6 +425,27 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                             base64::decode(&record.value)
                                 .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
                         )),
+                    ))
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
+            RrSet::RRSIG { rr_set } => {
+                let conv = |record: RrsigRecord| {
+                    Ok(Record::from_rdata(
+                        entry.name.clone(),
+                        record.ttl,
+                        RData::DNSSEC(DNSSECRData::SIG(sig::SIG::new(
+                            record.type_covered,
+                            record.algorithm.into(),
+                            record.labels,
+                            record.original_ttl,
+                            record.signature_expiration,
+                            record.signature_inception,
+                            record.key_tag,
+                            record.signer_name,
+                            base64::decode(&record.signature)
+                                .map_err(|_| "RRSIG signature not valid base64 (a-zA-Z0-9/+)")?,
+                        ))),
                     ))
                 };
                 rr_set.into_iter().map(conv).collect()
