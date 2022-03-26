@@ -289,7 +289,12 @@ impl RedisEntry {
 
     /// The key to use in redis for this entry.
     pub fn redis_key(&self) -> String {
-        format!("{}:{}", self.name.to_lowercase(), self.rr_type_str())
+        match self.rr_set {
+            RrSet::RRSIG { .. } => {
+                format!("{}:RRSIG:{}", self.name.to_lowercase(), self.rr_type_str())
+            }
+            _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type_str()),
+        }
     }
 
     /// Serializes this entry to store it in redis.
