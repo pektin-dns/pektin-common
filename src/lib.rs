@@ -297,8 +297,7 @@ impl RedisEntry {
     /// Note that deserializing must be done using
     /// [`deserialize_from_redis()`](RedisEntry::deserialize_from_redis()).
     pub fn serialize_for_redis(&self) -> Result<String, PektinCommonError> {
-        let value = serde_json::to_value(self)?;
-        serde_json::to_string(&value["rr_set"]).map_err(Into::into)
+        serde_json::to_string(self).map_err(Into::into)
     }
 
     /// Deserializes a [`RedisEntry`] from a redis key and value.
@@ -306,20 +305,10 @@ impl RedisEntry {
     /// The value must match the format that is returned by
     /// [`serialize_for_redis()`](RedisEntry::serialize_for_redis()).
     pub fn deserialize_from_redis(
-        redis_key: impl AsRef<str>,
+        _redis_key: impl AsRef<str>,
         redis_value: impl AsRef<str>,
     ) -> Result<Self, PektinCommonError> {
-        let (name, rr_type) = redis_key
-            .as_ref()
-            .split_once(':')
-            .expect("Record key in redis has invalid format");
-        serde_json::from_str(&format!(
-            r#"{{ "name": "{}", "rr_type": "{}", "rr_set": {} }}"#,
-            name,
-            rr_type,
-            redis_value.as_ref()
-        ))
-        .map_err(Into::into)
+        serde_json::from_str(redis_value.as_ref()).map_err(Into::into)
     }
 
     pub fn rr_type(&self) -> RecordType {
