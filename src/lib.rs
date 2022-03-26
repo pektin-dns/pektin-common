@@ -35,19 +35,16 @@ pub enum PektinCommonError {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ARecord {
-    pub ttl: u32,
     pub value: Ipv4Addr,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct AaaaRecord {
-    pub ttl: u32,
     pub value: Ipv6Addr,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CaaRecord {
-    pub ttl: u32,
     pub issuer_critical: bool,
     pub tag: Property,
     pub value: String,
@@ -55,13 +52,11 @@ pub struct CaaRecord {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CnameRecord {
-    pub ttl: u32,
     pub value: Name,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DnskeyRecord {
-    pub ttl: u32,
     pub zone: bool,
     pub revoked: bool,
     pub secure_entry_point: bool,
@@ -71,26 +66,22 @@ pub struct DnskeyRecord {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MxRecord {
-    pub ttl: u32,
     #[serde(flatten)]
     pub value: MX,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NsRecord {
-    pub ttl: u32,
     pub value: Name,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct OpenpgpkeyRecord {
-    pub ttl: u32,
     pub value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RrsigRecord {
-    pub ttl: u32,
     pub type_covered: RecordType,
     pub algorithm: DnssecAlgorithm,
     pub labels: u8,
@@ -104,21 +95,18 @@ pub struct RrsigRecord {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SoaRecord {
-    pub ttl: u32,
     #[serde(flatten)]
     pub value: SOA,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SrvRecord {
-    pub ttl: u32,
     #[serde(flatten)]
     pub value: SRV,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TlsaRecord {
-    pub ttl: u32,
     pub cert_usage: CertUsage,
     pub selector: Selector,
     pub matching: Matching,
@@ -127,7 +115,6 @@ pub struct TlsaRecord {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TxtRecord {
-    pub ttl: u32,
     pub value: String,
 }
 
@@ -177,11 +164,30 @@ impl RrSet {
     pub fn is_empty(&self) -> bool {
         rr_set_vec!(self, rr_set, rr_set.is_empty())
     }
+
+    pub fn rr_type(&self) -> RecordType {
+        match self {
+            RrSet::A { .. } => RecordType::A,
+            RrSet::AAAA { .. } => RecordType::AAAA,
+            RrSet::CAA { .. } => RecordType::CAA,
+            RrSet::CNAME { .. } => RecordType::CNAME,
+            RrSet::DNSKEY { .. } => RecordType::DNSKEY,
+            RrSet::MX { .. } => RecordType::MX,
+            RrSet::NS { .. } => RecordType::NS,
+            RrSet::OPENPGPKEY { .. } => RecordType::OPENPGPKEY,
+            RrSet::RRSIG { .. } => RecordType::RRSIG,
+            RrSet::SOA { .. } => RecordType::SOA,
+            RrSet::SRV { .. } => RecordType::SRV,
+            RrSet::TLSA { .. } => RecordType::TLSA,
+            RrSet::TXT { .. } => RecordType::TXT,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RedisEntry {
     pub name: Name,
+    pub ttl: u32,
     #[serde(flatten)]
     pub rr_set: RrSet,
 }
@@ -316,6 +322,10 @@ impl RedisEntry {
         .map_err(Into::into)
     }
 
+    pub fn rr_type(&self) -> RecordType {
+        self.rr_set.rr_type()
+    }
+
     fn rr_type_str(&self) -> &'static str {
         match self.rr_set {
             RrSet::A { .. } => "A",
@@ -342,12 +352,12 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
         match entry.rr_set {
             RrSet::A { rr_set } => Ok(rr_set
                 .into_iter()
-                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::A(data.value)))
+                .map(|data| Record::from_rdata(entry.name.clone(), entry.ttl, RData::A(data.value)))
                 .collect()),
             RrSet::AAAA { rr_set } => Ok(rr_set
                 .into_iter()
                 .map(|data| {
-                    Record::from_rdata(entry.name.clone(), data.ttl, RData::AAAA(data.value))
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::AAAA(data.value))
                 })
                 .collect()),
             RrSet::CAA { rr_set } => {
@@ -375,7 +385,7 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                     };
                     Ok(Record::from_rdata(
                         entry.name.clone(),
-                        record.ttl,
+                        entry.ttl,
                         RData::CAA(caa::CAA {
                             issuer_critical: record.issuer_critical,
                             tag: record.tag.into(),
@@ -388,14 +398,14 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
             RrSet::CNAME { rr_set } => Ok(rr_set
                 .into_iter()
                 .map(|data| {
-                    Record::from_rdata(entry.name.clone(), data.ttl, RData::CNAME(data.value))
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::CNAME(data.value))
                 })
                 .collect()),
             RrSet::DNSKEY { rr_set } => {
                 let conv = |record: DnskeyRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
-                        record.ttl,
+                        entry.ttl,
                         RData::DNSSEC(DNSSECRData::DNSKEY(dnskey::DNSKEY::new(
                             record.zone,
                             record.secure_entry_point,
@@ -410,17 +420,21 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
             }
             RrSet::MX { rr_set } => Ok(rr_set
                 .into_iter()
-                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::MX(data.value)))
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::MX(data.value))
+                })
                 .collect()),
             RrSet::NS { rr_set } => Ok(rr_set
                 .into_iter()
-                .map(|data| Record::from_rdata(entry.name.clone(), data.ttl, RData::NS(data.value)))
+                .map(|data| {
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::NS(data.value))
+                })
                 .collect()),
             RrSet::OPENPGPKEY { rr_set } => {
                 let conv = |record: OpenpgpkeyRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
-                        record.ttl,
+                        entry.ttl,
                         RData::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
                             base64::decode(&record.value)
                                 .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
@@ -433,7 +447,7 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                 let conv = |record: RrsigRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
-                        record.ttl,
+                        entry.ttl,
                         RData::DNSSEC(DNSSECRData::SIG(sig::SIG::new(
                             record.type_covered,
                             record.algorithm.into(),
@@ -453,20 +467,20 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
             RrSet::SOA { rr_set } => Ok(rr_set
                 .into_iter()
                 .map(|data| {
-                    Record::from_rdata(entry.name.clone(), data.ttl, RData::SOA(data.value))
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::SOA(data.value))
                 })
                 .collect()),
             RrSet::SRV { rr_set } => Ok(rr_set
                 .into_iter()
                 .map(|data| {
-                    Record::from_rdata(entry.name.clone(), data.ttl, RData::SRV(data.value))
+                    Record::from_rdata(entry.name.clone(), entry.ttl, RData::SRV(data.value))
                 })
                 .collect()),
             RrSet::TLSA { rr_set } => {
                 let conv = |record: TlsaRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
-                        record.ttl,
+                        entry.ttl,
                         RData::TLSA(tlsa::TLSA::new(
                             record.cert_usage.into(),
                             record.selector.into(),
@@ -484,7 +498,7 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                 .map(|data| {
                     Record::from_rdata(
                         entry.name.clone(),
-                        data.ttl,
+                        entry.ttl,
                         RData::TXT(txt::TXT::new(vec![data.value])),
                     )
                 })
