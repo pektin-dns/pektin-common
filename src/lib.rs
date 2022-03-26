@@ -289,11 +289,15 @@ impl RedisEntry {
 
     /// The key to use in redis for this entry.
     pub fn redis_key(&self) -> String {
-        match self.rr_set {
-            RrSet::RRSIG { .. } => {
-                format!("{}:RRSIG:{}", self.name.to_lowercase(), self.rr_type_str())
+        match &self.rr_set {
+            RrSet::RRSIG { rr_set, .. } => {
+                let type_covered = rr_set
+                    .get(0)
+                    .expect("no RRSIG record in RRSIG RRset")
+                    .type_covered;
+                format!("{}:RRSIG:{}", self.name.to_lowercase(), type_covered)
             }
-            _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type_str()),
+            _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type()),
         }
     }
 
@@ -318,24 +322,6 @@ impl RedisEntry {
 
     pub fn rr_type(&self) -> RecordType {
         self.rr_set.rr_type()
-    }
-
-    fn rr_type_str(&self) -> &'static str {
-        match self.rr_set {
-            RrSet::A { .. } => "A",
-            RrSet::AAAA { .. } => "AAAA",
-            RrSet::CAA { .. } => "CAA",
-            RrSet::CNAME { .. } => "CNAME",
-            RrSet::DNSKEY { .. } => "DNSKEY",
-            RrSet::MX { .. } => "MX",
-            RrSet::NS { .. } => "NS",
-            RrSet::OPENPGPKEY { .. } => "OPENPGPKEY",
-            RrSet::RRSIG { .. } => "RRSIG",
-            RrSet::SOA { .. } => "SOA",
-            RrSet::SRV { .. } => "SRV",
-            RrSet::TLSA { .. } => "TLSA",
-            RrSet::TXT { .. } => "TXT",
-        }
     }
 }
 
