@@ -425,7 +425,7 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
             }
             RrSet::RRSIG { rr_set } => {
                 let conv = |record: RrsigRecord| {
-                    Ok(Record::from_rdata(
+                    let mut record = Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
                         RData::DNSSEC(DNSSECRData::SIG(sig::SIG::new(
@@ -440,7 +440,9 @@ impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
                             base64::decode(&record.signature)
                                 .map_err(|_| "RRSIG signature not valid base64 (a-zA-Z0-9/+)")?,
                         ))),
-                    ))
+                    );
+                    record.set_rr_type(RecordType::RRSIG);
+                    Ok(record)
                 };
                 rr_set.into_iter().map(conv).collect()
             }
