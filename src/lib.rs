@@ -7,6 +7,7 @@ pub use trust_dns_proto as proto;
 
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::Connection;
+use log::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
@@ -289,7 +290,7 @@ impl RedisEntry {
 
     /// The key to use in redis for this entry.
     pub fn redis_key(&self) -> String {
-        match &self.rr_set {
+        let key = match &self.rr_set {
             RrSet::RRSIG { rr_set, .. } => {
                 let type_covered = rr_set
                     .get(0)
@@ -298,7 +299,9 @@ impl RedisEntry {
                 format!("{}:RRSIG:{}", self.name.to_lowercase(), type_covered)
             }
             _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type()),
-        }
+        };
+        debug!("redis key for entry {:?} is {}", self, key);
+        key
     }
 
     /// Serializes this entry to store it in redis.
@@ -306,7 +309,9 @@ impl RedisEntry {
     /// Note that deserializing must be done using
     /// [`deserialize_from_redis()`](RedisEntry::deserialize_from_redis()).
     pub fn serialize_for_redis(&self) -> Result<String, PektinCommonError> {
-        serde_json::to_string(self).map_err(Into::into)
+        let json = serde_json::to_string(self)?;
+        trace!("serialized redis entry to json: {}", json);
+        Ok(json)
     }
 
     /// Deserializes a [`RedisEntry`] from a redis key and value.
@@ -314,10 +319,16 @@ impl RedisEntry {
     /// The value must match the format that is returned by
     /// [`serialize_for_redis()`](RedisEntry::serialize_for_redis()).
     pub fn deserialize_from_redis(
-        _redis_key: impl AsRef<str>,
+        redis_key: impl AsRef<str>,
         redis_value: impl AsRef<str>,
     ) -> Result<Self, PektinCommonError> {
-        serde_json::from_str(redis_value.as_ref()).map_err(Into::into)
+        let (redis_key, redis_value) = (redis_key.as_ref(), redis_value.as_ref());
+        trace!(
+            "Deserializing redis entry from key {} and value {}",
+            redis_key,
+            redis_value
+        );
+        serde_json::from_str(redis_value).map_err(Into::into)
     }
 
     pub fn rr_type(&self) -> RecordType {
@@ -514,7 +525,7 @@ pub fn load_env(
     if !confidential {
         println!("\t{}={}", param_name, res);
     } else {
-        println!("\t{}=<REDACTED>", param_name);
+        println!("\t{}=<REDACTED (len={})>", param_name, res.len());
     }
     Ok(res)
 }
@@ -523,7 +534,7 @@ pub fn load_env(
 pub async fn get_authoritative_zones(
     con: &mut Connection,
 ) -> Result<Vec<String>, PektinCommonError> {
-    Ok(con
+    let zones = con
         .keys::<_, Vec<String>>("*.:SOA")
         .await?
         .into_iter()
@@ -531,5 +542,7 @@ pub async fn get_authoritative_zones(
             key.truncate(key.find(':').unwrap());
             key
         })
-        .collect())
+        .collect();
+    debug!("found authoritative zones: {:?}", zones);
+    Ok(zones)
 }
