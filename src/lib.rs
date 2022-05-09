@@ -25,8 +25,8 @@ pub enum PektinCommonError {
     InvalidEnvVar(String),
     #[error("Couldn't read file based environment variable: {0} from path: {1} \n {2}")]
     InvalidEnvVarFilePath(String, String, String),
-    #[error("Error contacting Redis")]
-    Redis(#[from] deadpool_redis::redis::RedisError),
+    #[error("Error contacting Db")]
+    Db(#[from] deadpool_redis::redis::RedisError),
     #[error("Could not (de)serialize JSON")]
     Json(#[from] serde_json::Error),
 }
@@ -186,7 +186,7 @@ impl RrSet {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RedisEntry {
+pub struct DbEntry {
     pub name: Name,
     pub ttl: u32,
     #[serde(flatten)]
@@ -281,15 +281,15 @@ impl From<DnssecAlgorithm> for dnssec::Algorithm {
     }
 }
 
-impl RedisEntry {
+impl DbEntry {
     /// Tries to convert the entry to a vector of TrustDNS's [`Record`](trust_dns_proto::rr::Record)
     /// type.
     pub fn convert(self) -> Result<Vec<trust_dns_proto::rr::Record>, String> {
         self.try_into()
     }
 
-    /// The key to use in redis for this entry.
-    pub fn redis_key(&self) -> String {
+    /// The key to use in db for this entry.
+    pub fn db_key(&self) -> String {
         let key = match &self.rr_set {
             RrSet::RRSIG { rr_set, .. } => {
                 let type_covered = rr_set
@@ -300,35 +300,35 @@ impl RedisEntry {
             }
             _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type()),
         };
-        debug!("redis key for entry {:?} is {}", self, key);
+        debug!("db key for entry {:?} is {}", self, key);
         key
     }
 
-    /// Serializes this entry to store it in redis.
+    /// Serializes this entry to store it in db.
     ///
     /// Note that deserializing must be done using
-    /// [`deserialize_from_redis()`](RedisEntry::deserialize_from_redis()).
-    pub fn serialize_for_redis(&self) -> Result<String, PektinCommonError> {
+    /// [`deserialize_from_db()`](DbEntry::deserialize_from_db()).
+    pub fn serialize_for_db(&self) -> Result<String, PektinCommonError> {
         let json = serde_json::to_string(self)?;
-        trace!("serialized redis entry to json: {}", json);
+        trace!("serialized db entry to json: {}", json);
         Ok(json)
     }
 
-    /// Deserializes a [`RedisEntry`] from a redis key and value.
+    /// Deserializes a [`DbEntry`] from a db key and value.
     ///
     /// The value must match the format that is returned by
-    /// [`serialize_for_redis()`](RedisEntry::serialize_for_redis()).
-    pub fn deserialize_from_redis(
-        redis_key: impl AsRef<str>,
-        redis_value: impl AsRef<str>,
+    /// [`serialize_for_db()`](DbEntry::serialize_for_db()).
+    pub fn deserialize_from_db(
+        db_key: impl AsRef<str>,
+        db_value: impl AsRef<str>,
     ) -> Result<Self, PektinCommonError> {
-        let (redis_key, redis_value) = (redis_key.as_ref(), redis_value.as_ref());
+        let (db_key, db_value) = (db_key.as_ref(), db_value.as_ref());
         trace!(
-            "Deserializing redis entry from key {} and value {}",
-            redis_key,
-            redis_value
+            "Deserializing db entry from key {} and value {}",
+            db_key,
+            db_value
         );
-        serde_json::from_str(redis_value).map_err(Into::into)
+        serde_json::from_str(db_value).map_err(Into::into)
     }
 
     pub fn rr_type(&self) -> RecordType {
@@ -336,9 +336,9 @@ impl RedisEntry {
     }
 }
 
-impl TryFrom<RedisEntry> for Vec<trust_dns_proto::rr::Record> {
+impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
     type Error = String;
-    fn try_from(entry: RedisEntry) -> Result<Self, String> {
+    fn try_from(entry: DbEntry) -> Result<Self, String> {
         use trust_dns_proto::rr::Record;
         match entry.rr_set {
             RrSet::A { rr_set } => Ok(rr_set
