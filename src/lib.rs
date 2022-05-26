@@ -7,7 +7,6 @@ pub use trust_dns_proto as proto;
 
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::Connection;
-use log::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
@@ -16,6 +15,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 use thiserror::Error;
+use tracing::{debug, error, instrument, trace};
 
 #[derive(Debug, Error)]
 pub enum PektinCommonError {
@@ -300,7 +300,7 @@ impl DbEntry {
             }
             _ => format!("{}:{}", self.name.to_lowercase(), self.rr_type()),
         };
-        debug!("db key for entry {:?} is {}", self, key);
+        trace!("db key for entry {:?} is {}", self, key);
         key
     }
 
@@ -403,7 +403,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                             record.revoked,
                             record.algorithm.into(),
                             base64::decode(&record.key)
-                                .map_err(|_| "DNSKKEY key not valid base64 (a-zA-Z0-9/+)")?,
+                                .map_err(|_| "DNSKEY key not valid base64 (a-zA-Z0-9/+)")?,
                         ))),
                     ))
                 };
@@ -531,6 +531,7 @@ pub fn load_env(
 }
 
 // find all zones that we are authoritative for
+#[instrument(skip(con))]
 pub async fn get_authoritative_zones(
     con: &mut Connection,
 ) -> Result<Vec<String>, PektinCommonError> {
