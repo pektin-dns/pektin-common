@@ -189,7 +189,8 @@ impl RrSet {
 pub struct DbEntry {
     pub name: Name,
     pub ttl: u32,
-    pub meta: Option<String>,
+    #[serde(default)]
+    pub meta: String,
     #[serde(flatten)]
     pub rr_set: RrSet,
 }
