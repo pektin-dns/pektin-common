@@ -189,10 +189,14 @@ impl RrSet {
 pub struct DbEntry {
     pub name: Name,
     pub ttl: u32,
-    #[serde(default)]
+    #[serde(default = "default_meta")]
     pub meta: String,
     #[serde(flatten)]
     pub rr_set: RrSet,
+}
+
+fn default_meta() -> String {
+    "".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
