@@ -222,7 +222,7 @@ fn default_meta() -> String {
     "".to_string()
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Property {
     #[serde(rename = "iodef")]
     Iodef,
@@ -242,7 +242,7 @@ impl From<Property> for caa::Property {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
 pub enum CertUsage {
     CA = 0,
@@ -262,7 +262,7 @@ impl From<CertUsage> for tlsa::CertUsage {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
 pub enum Selector {
     Full = 0,
@@ -278,7 +278,7 @@ impl From<Selector> for tlsa::Selector {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
 pub enum Matching {
     Raw = 0,
@@ -296,7 +296,7 @@ impl From<Matching> for tlsa::Matching {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
 pub enum HashAlgorithm {
     SHA1 = 1,
@@ -310,7 +310,7 @@ impl From<HashAlgorithm> for dnssec::Nsec3HashAlgorithm {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
 #[repr(u8)]
 pub enum DnssecAlgorithm {
     ECDSAP256SHA256 = 13,
