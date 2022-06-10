@@ -1,7 +1,7 @@
 pub use deadpool_redis;
 use proto::rr::dnssec;
-use proto::rr::dnssec::rdata::{dnskey, sig, DNSSECRData};
-use proto::rr::rdata::{caa, openpgpkey, tlsa, txt, MX, SOA, SRV};
+use proto::rr::dnssec::rdata::{DNSSECRData, DNSKEY, NSEC3, NSEC3PARAM, SIG};
+use proto::rr::rdata::{caa, tlsa, MX, OPENPGPKEY, SOA, SRV, TXT};
 use proto::rr::{Name, RData, RecordType};
 pub use trust_dns_proto as proto;
 
@@ -77,6 +77,23 @@ pub struct NsRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Nsec3Record {
+    pub hash_algorithm: HashAlgorithm,
+    pub opt_out: bool,
+    pub iterations: u16,
+    pub salt: Option<Vec<u8>>,
+    pub next_hashed_owner: Vec<u8>,
+    pub types: Vec<RecordType>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Nsec3ParamRecord {
+    pub hash_algorithm: HashAlgorithm,
+    pub iterations: u16,
+    pub salt: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct OpenpgpkeyRecord {
     pub value: String,
 }
@@ -129,6 +146,8 @@ pub enum RrSet {
     DNSKEY { rr_set: Vec<DnskeyRecord> },
     MX { rr_set: Vec<MxRecord> },
     NS { rr_set: Vec<NsRecord> },
+    NSEC3 { rr_set: Vec<Nsec3Record> },
+    NSEC3PARAM { rr_set: Vec<Nsec3ParamRecord> },
     OPENPGPKEY { rr_set: Vec<OpenpgpkeyRecord> },
     RRSIG { rr_set: Vec<RrsigRecord> },
     SOA { rr_set: Vec<SoaRecord> },
@@ -147,6 +166,8 @@ macro_rules! rr_set_vec {
             RrSet::DNSKEY { $vec_name } => $vec_expr,
             RrSet::MX { $vec_name } => $vec_expr,
             RrSet::NS { $vec_name } => $vec_expr,
+            RrSet::NSEC3 { $vec_name } => $vec_expr,
+            RrSet::NSEC3PARAM { $vec_name } => $vec_expr,
             RrSet::OPENPGPKEY { $vec_name } => $vec_expr,
             RrSet::RRSIG { $vec_name } => $vec_expr,
             RrSet::SOA { $vec_name } => $vec_expr,
@@ -175,6 +196,8 @@ impl RrSet {
             RrSet::DNSKEY { .. } => RecordType::DNSKEY,
             RrSet::MX { .. } => RecordType::MX,
             RrSet::NS { .. } => RecordType::NS,
+            RrSet::NSEC3 { .. } => RecordType::NSEC3,
+            RrSet::NSEC3PARAM { .. } => RecordType::NSEC3PARAM,
             RrSet::OPENPGPKEY { .. } => RecordType::OPENPGPKEY,
             RrSet::RRSIG { .. } => RecordType::RRSIG,
             RrSet::SOA { .. } => RecordType::SOA,
@@ -269,6 +292,20 @@ impl From<Matching> for tlsa::Matching {
             Matching::Raw => Self::Raw,
             Matching::Sha256 => Self::Sha256,
             Matching::Sha512 => Self::Sha512,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[repr(u8)]
+pub enum HashAlgorithm {
+    SHA1 = 1,
+}
+
+impl From<HashAlgorithm> for dnssec::Nsec3HashAlgorithm {
+    fn from(algorithm: HashAlgorithm) -> Self {
+        match algorithm {
+            HashAlgorithm::SHA1 => Self::SHA1,
         }
     }
 }
@@ -403,7 +440,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::DNSSEC(DNSSECRData::DNSKEY(dnskey::DNSKEY::new(
+                        RData::DNSSEC(DNSSECRData::DNSKEY(DNSKEY::new(
                             record.zone,
                             record.secure_entry_point,
                             record.revoked,
@@ -427,12 +464,48 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Record::from_rdata(entry.name.clone(), entry.ttl, RData::NS(data.value))
                 })
                 .collect()),
+            RrSet::NSEC3 { rr_set } => {
+                let conv = |record: Nsec3Record| {
+                    let mut record = Record::from_rdata(
+                        entry.name.clone(),
+                        entry.ttl,
+                        RData::DNSSEC(DNSSECRData::NSEC3(NSEC3::new(
+                            record.hash_algorithm.into(),
+                            record.opt_out,
+                            record.iterations,
+                            record.salt.unwrap_or_default(),
+                            record.next_hashed_owner,
+                            record.types,
+                        ))),
+                    );
+                    record.set_rr_type(RecordType::NSEC3);
+                    Ok(record)
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
+            RrSet::NSEC3PARAM { rr_set } => {
+                let conv = |record: Nsec3ParamRecord| {
+                    let mut record = Record::from_rdata(
+                        entry.name.clone(),
+                        entry.ttl,
+                        RData::DNSSEC(DNSSECRData::NSEC3PARAM(NSEC3PARAM::new(
+                            record.hash_algorithm.into(),
+                            false,
+                            record.iterations,
+                            record.salt.unwrap_or_default(),
+                        ))),
+                    );
+                    record.set_rr_type(RecordType::NSEC3PARAM);
+                    Ok(record)
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
             RrSet::OPENPGPKEY { rr_set } => {
                 let conv = |record: OpenpgpkeyRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
+                        RData::OPENPGPKEY(OPENPGPKEY::new(
                             base64::decode(&record.value)
                                 .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
                         )),
@@ -445,7 +518,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     let mut record = Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::DNSSEC(DNSSECRData::SIG(sig::SIG::new(
+                        RData::DNSSEC(DNSSECRData::SIG(SIG::new(
                             record.type_covered,
                             record.algorithm.into(),
                             record.labels,
@@ -498,7 +571,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::TXT(txt::TXT::new(vec![data.value])),
+                        RData::TXT(TXT::new(vec![data.value])),
                     )
                 })
                 .collect()),
