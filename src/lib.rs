@@ -1,7 +1,7 @@
 pub use deadpool_redis;
 use proto::rr::dnssec;
-use proto::rr::dnssec::rdata::{dnskey, sig, DNSSECRData};
-use proto::rr::rdata::{caa, openpgpkey, tlsa, txt, MX, SOA, SRV};
+use proto::rr::dnssec::rdata::{DNSSECRData, DNSKEY, NSEC3, NSEC3PARAM, SIG};
+use proto::rr::rdata::{caa, tlsa, MX, OPENPGPKEY, SOA, SRV, TXT};
 use proto::rr::{Name, RData, RecordType};
 pub use trust_dns_proto as proto;
 
@@ -27,36 +27,38 @@ pub enum PektinCommonError {
     InvalidEnvVarFilePath(String, String, String),
     #[error("Error contacting Db")]
     Db(#[from] deadpool_redis::redis::RedisError),
-    #[error("Could not (de)serialize JSON")]
+    #[error("Couldn't (de)serialize JSON")]
     Json(#[from] serde_json::Error),
+    #[error("Couldn't convert DbEntry to TrustDNS's record")]
+    Convert(String),
 }
 
 // The following type definitions may seem weird (because they are), but they were crafted
 // carefully to make the serialized JSON look nice.
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ARecord {
     pub value: Ipv4Addr,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct AaaaRecord {
     pub value: Ipv6Addr,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CaaRecord {
     pub issuer_critical: bool,
     pub tag: Property,
     pub value: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CnameRecord {
     pub value: Name,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DnskeyRecord {
     pub zone: bool,
     pub revoked: bool,
@@ -65,23 +67,40 @@ pub struct DnskeyRecord {
     pub key: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct MxRecord {
     #[serde(flatten)]
     pub value: MX,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct NsRecord {
     pub value: Name,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct Nsec3Record {
+    pub hash_algorithm: HashAlgorithm,
+    pub opt_out: bool,
+    pub iterations: u16,
+    pub salt: Option<Vec<u8>>,
+    pub next_hashed_owner: Vec<u8>,
+    pub types: Vec<RecordType>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct Nsec3ParamRecord {
+    pub hash_algorithm: HashAlgorithm,
+    pub iterations: u16,
+    pub salt: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct OpenpgpkeyRecord {
     pub value: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct RrsigRecord {
     pub type_covered: RecordType,
     pub algorithm: DnssecAlgorithm,
@@ -94,19 +113,19 @@ pub struct RrsigRecord {
     pub signature: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SoaRecord {
     #[serde(flatten)]
     pub value: SOA,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SrvRecord {
     #[serde(flatten)]
     pub value: SRV,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TlsaRecord {
     pub cert_usage: CertUsage,
     pub selector: Selector,
@@ -114,12 +133,12 @@ pub struct TlsaRecord {
     pub cert_data: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TxtRecord {
     pub value: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "rr_type")]
 pub enum RrSet {
     A { rr_set: Vec<ARecord> },
@@ -129,6 +148,8 @@ pub enum RrSet {
     DNSKEY { rr_set: Vec<DnskeyRecord> },
     MX { rr_set: Vec<MxRecord> },
     NS { rr_set: Vec<NsRecord> },
+    NSEC3 { rr_set: Vec<Nsec3Record> },
+    NSEC3PARAM { rr_set: Vec<Nsec3ParamRecord> },
     OPENPGPKEY { rr_set: Vec<OpenpgpkeyRecord> },
     RRSIG { rr_set: Vec<RrsigRecord> },
     SOA { rr_set: Vec<SoaRecord> },
@@ -147,6 +168,8 @@ macro_rules! rr_set_vec {
             RrSet::DNSKEY { $vec_name } => $vec_expr,
             RrSet::MX { $vec_name } => $vec_expr,
             RrSet::NS { $vec_name } => $vec_expr,
+            RrSet::NSEC3 { $vec_name } => $vec_expr,
+            RrSet::NSEC3PARAM { $vec_name } => $vec_expr,
             RrSet::OPENPGPKEY { $vec_name } => $vec_expr,
             RrSet::RRSIG { $vec_name } => $vec_expr,
             RrSet::SOA { $vec_name } => $vec_expr,
@@ -175,6 +198,8 @@ impl RrSet {
             RrSet::DNSKEY { .. } => RecordType::DNSKEY,
             RrSet::MX { .. } => RecordType::MX,
             RrSet::NS { .. } => RecordType::NS,
+            RrSet::NSEC3 { .. } => RecordType::NSEC3,
+            RrSet::NSEC3PARAM { .. } => RecordType::NSEC3PARAM,
             RrSet::OPENPGPKEY { .. } => RecordType::OPENPGPKEY,
             RrSet::RRSIG { .. } => RecordType::RRSIG,
             RrSet::SOA { .. } => RecordType::SOA,
@@ -185,15 +210,21 @@ impl RrSet {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DbEntry {
     pub name: Name,
     pub ttl: u32,
+    #[serde(default = "default_meta")]
+    pub meta: String,
     #[serde(flatten)]
     pub rr_set: RrSet,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+fn default_meta() -> String {
+    "".to_string()
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum Property {
     #[serde(rename = "iodef")]
     Iodef,
@@ -213,7 +244,7 @@ impl From<Property> for caa::Property {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Eq, Serialize_repr)]
 #[repr(u8)]
 pub enum CertUsage {
     CA = 0,
@@ -233,7 +264,7 @@ impl From<CertUsage> for tlsa::CertUsage {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Eq, Serialize_repr)]
 #[repr(u8)]
 pub enum Selector {
     Full = 0,
@@ -249,7 +280,7 @@ impl From<Selector> for tlsa::Selector {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Eq, Serialize_repr)]
 #[repr(u8)]
 pub enum Matching {
     Raw = 0,
@@ -267,7 +298,21 @@ impl From<Matching> for tlsa::Matching {
     }
 }
 
-#[derive(Clone, Debug, Deserialize_repr, PartialEq, Serialize_repr)]
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Eq, Serialize_repr)]
+#[repr(u8)]
+pub enum HashAlgorithm {
+    SHA1 = 1,
+}
+
+impl From<HashAlgorithm> for dnssec::Nsec3HashAlgorithm {
+    fn from(algorithm: HashAlgorithm) -> Self {
+        match algorithm {
+            HashAlgorithm::SHA1 => Self::SHA1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize_repr, PartialEq, Eq, Serialize_repr)]
 #[repr(u8)]
 pub enum DnssecAlgorithm {
     ECDSAP256SHA256 = 13,
@@ -284,7 +329,7 @@ impl From<DnssecAlgorithm> for dnssec::Algorithm {
 impl DbEntry {
     /// Tries to convert the entry to a vector of TrustDNS's [`Record`](trust_dns_proto::rr::Record)
     /// type.
-    pub fn convert(self) -> Result<Vec<trust_dns_proto::rr::Record>, String> {
+    pub fn convert(self) -> Result<Vec<trust_dns_proto::rr::Record>, PektinCommonError> {
         self.try_into()
     }
 
@@ -337,8 +382,8 @@ impl DbEntry {
 }
 
 impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
-    type Error = String;
-    fn try_from(entry: DbEntry) -> Result<Self, String> {
+    type Error = PektinCommonError;
+    fn try_from(entry: DbEntry) -> Result<Self, Self::Error> {
         use trust_dns_proto::rr::Record;
         match entry.rr_set {
             RrSet::A { rr_set } => Ok(rr_set
@@ -355,22 +400,21 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                 // and now for the tricky bit (RIP Joe Armstrong)
                 let conv = |record: CaaRecord| {
                     let value = match record.tag {
-                        Property::Iodef => caa::Value::Url(
-                            url::Url::parse(&record.value)
-                                .map_err(|_| "invalid CAA iodef url".to_string())?,
-                        ),
+                        Property::Iodef => {
+                            caa::Value::Url(url::Url::parse(&record.value).map_err(|_| {
+                                PektinCommonError::Convert("invalid CAA iodef url".into())
+                            })?)
+                        }
                         Property::Issue => caa::Value::Issuer(
-                            Some(
-                                Name::from_utf8(record.value)
-                                    .map_err(|_| "invalid CAA issue name".to_string())?,
-                            ),
+                            Some(Name::from_utf8(record.value).map_err(|_| {
+                                PektinCommonError::Convert("invalid CAA issue name".into())
+                            })?),
                             vec![],
                         ),
                         Property::IssueWild => caa::Value::Issuer(
-                            Some(
-                                Name::from_utf8(record.value)
-                                    .map_err(|_| "invalid CAA issuewild name".to_string())?,
-                            ),
+                            Some(Name::from_utf8(record.value).map_err(|_| {
+                                PektinCommonError::Convert("invalid CAA issuewild name".into())
+                            })?),
                             vec![],
                         ),
                     };
@@ -397,13 +441,16 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::DNSSEC(DNSSECRData::DNSKEY(dnskey::DNSKEY::new(
+                        RData::DNSSEC(DNSSECRData::DNSKEY(DNSKEY::new(
                             record.zone,
                             record.secure_entry_point,
                             record.revoked,
                             record.algorithm.into(),
-                            base64::decode(&record.key)
-                                .map_err(|_| "DNSKEY key not valid base64 (a-zA-Z0-9/+)")?,
+                            base64::decode(&record.key).map_err(|_| {
+                                PektinCommonError::Convert(
+                                    "DNSKEY key not valid base64 (a-zA-Z0-9/+)".into(),
+                                )
+                            })?,
                         ))),
                     ))
                 };
@@ -421,15 +468,54 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Record::from_rdata(entry.name.clone(), entry.ttl, RData::NS(data.value))
                 })
                 .collect()),
+            RrSet::NSEC3 { rr_set } => {
+                let conv = |record: Nsec3Record| {
+                    let mut record = Record::from_rdata(
+                        entry.name.clone(),
+                        entry.ttl,
+                        RData::DNSSEC(DNSSECRData::NSEC3(NSEC3::new(
+                            record.hash_algorithm.into(),
+                            record.opt_out,
+                            record.iterations,
+                            record.salt.unwrap_or_default(),
+                            record.next_hashed_owner,
+                            record.types,
+                        ))),
+                    );
+                    record.set_rr_type(RecordType::NSEC3);
+                    Ok(record)
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
+            RrSet::NSEC3PARAM { rr_set } => {
+                let conv = |record: Nsec3ParamRecord| {
+                    let mut record = Record::from_rdata(
+                        entry.name.clone(),
+                        entry.ttl,
+                        RData::DNSSEC(DNSSECRData::NSEC3PARAM(NSEC3PARAM::new(
+                            record.hash_algorithm.into(),
+                            false,
+                            record.iterations,
+                            record.salt.unwrap_or_default(),
+                        ))),
+                    );
+                    record.set_rr_type(RecordType::NSEC3PARAM);
+                    Ok(record)
+                };
+                rr_set.into_iter().map(conv).collect()
+            }
             RrSet::OPENPGPKEY { rr_set } => {
                 let conv = |record: OpenpgpkeyRecord| {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::OPENPGPKEY(openpgpkey::OPENPGPKEY::new(
-                            base64::decode(&record.value)
-                                .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
-                        )),
+                        RData::OPENPGPKEY(OPENPGPKEY::new(base64::decode(&record.value).map_err(
+                            |_| {
+                                PektinCommonError::Convert(
+                                    "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)".into(),
+                                )
+                            },
+                        )?)),
                     ))
                 };
                 rr_set.into_iter().map(conv).collect()
@@ -439,7 +525,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     let mut record = Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::DNSSEC(DNSSECRData::SIG(sig::SIG::new(
+                        RData::DNSSEC(DNSSECRData::SIG(SIG::new(
                             record.type_covered,
                             record.algorithm.into(),
                             record.labels,
@@ -448,8 +534,11 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                             record.signature_inception,
                             record.key_tag,
                             record.signer_name,
-                            base64::decode(&record.signature)
-                                .map_err(|_| "RRSIG signature not valid base64 (a-zA-Z0-9/+)")?,
+                            base64::decode(&record.signature).map_err(|_| {
+                                PektinCommonError::Convert(
+                                    "RRSIG signature not valid base64 (a-zA-Z0-9/+)".into(),
+                                )
+                            })?,
                         ))),
                     );
                     record.set_rr_type(RecordType::RRSIG);
@@ -479,7 +568,9 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                             record.selector.into(),
                             record.matching.into(),
                             hex::decode(&record.cert_data).map_err(|_| {
-                                "TLSA certificate data not hexadecimal data".to_string()
+                                PektinCommonError::Convert(
+                                    "TLSA certificate data not hexadecimal data".into(),
+                                )
                             })?,
                         )),
                     ))
@@ -492,7 +583,7 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::TXT(txt::TXT::new(vec![data.value])),
+                        RData::TXT(TXT::new(vec![data.value])),
                     )
                 })
                 .collect()),

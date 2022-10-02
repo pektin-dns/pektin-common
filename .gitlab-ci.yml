@@ -1,8 +1,0 @@
-include:
-    - project: pektin/pektin-dist
-      ref: main
-      file:
-
-image: alpine
-
-stages:
