@@ -509,13 +509,10 @@ impl TryFrom<DbEntry> for Vec<trust_dns_proto::rr::Record> {
                     Ok(Record::from_rdata(
                         entry.name.clone(),
                         entry.ttl,
-                        RData::OPENPGPKEY(OPENPGPKEY::new(base64::decode(&record.value).map_err(
-                            |_| {
-                                PektinCommonError::Convert(
-                                    "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)".into(),
-                                )
-                            },
-                        )?)),
+                        RData::OPENPGPKEY(OPENPGPKEY::new(
+                            base64::decode(&record.value)
+                                .map_err(|_| "OPENPGPKEY data not valid base64 (a-zA-Z0-9/+)")?,
+                        )),
                     ))
                 };
                 rr_set.into_iter().map(conv).collect()
